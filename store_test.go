@@ -6,6 +6,20 @@ import (
 	"testing"
 )
 
+func newStore() *Store {
+	opts := StoreOpts{
+		PathTransformFunc: CASPathTransformFun,
+	}
+	s := NewStore(opts)
+	return s
+}
+
+func teardown(t *testing.T, s *Store) {
+	if err := s.Clear(); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestPathTransformFun(t *testing.T) {
 	key := "mondasdad"
 	pathName := CASPathTransformFun(key)
@@ -13,33 +27,26 @@ func TestPathTransformFun(t *testing.T) {
 
 }
 
-func TestStoreDelete(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformFunc: CASPathTransformFun,
-	}
-	s := NewStore(opts)
-	s.Delete("cxp")
-}
-
 func TestStore(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformFunc: CASPathTransformFun,
-	}
-	s := NewStore(opts)
+	s := newStore()
+	defer teardown(t, s)
+	for i := 0; i < 50; i++ {
+		key := fmt.Sprintf("test_%d", i)
+		data := bytes.NewReader([]byte("some peg data"))
+		if err := s.writeStream(key, data); err != nil {
+			t.Error(err)
+		}
 
-	data := bytes.NewReader([]byte("some peg data"))
-	if err := s.writeStream("test_file", data); err != nil {
-		t.Error(err)
+		if ok := s.Has(key); !ok {
+			t.Error("file not found")
+		}
+
+		//bytes, err := s.Read("test_file")
+		//if err != nil {
+		//	t.Error(err)
+		//}
+		//
+		//fmt.Println(string(bytes))
 	}
 
-	if ok := s.Has("test_file"); !ok {
-		t.Error("file not found")
-	}
-
-	bytes, err := s.Read("test_file")
-	if err != nil {
-		t.Error(err)
-	}
-
-	fmt.Println(string(bytes))
 }

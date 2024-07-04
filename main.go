@@ -3,7 +3,7 @@ package main
 import (
 	"distribute-system/p2p"
 	"fmt"
-	"log"
+	"time"
 )
 
 func OnPeer(peer p2p.Peer) error {
@@ -22,17 +22,21 @@ func main() {
 
 	tr := p2p.NewTCPTransport(tcpOpts)
 
-	go func() {
-		for {
-			msg := <-tr.Consume()
-			fmt.Printf("Received message from: %v\n", msg.From)
-			fmt.Printf("Received message: %v\n", string(msg.Payload))
-
-		}
-	}()
-	if err := tr.ListenAndAccept(); err != nil {
-		log.Fatalf("failed to listen and accept: %v", err)
+	fileServerOpts := FileServerOpts{
+		StorageRoot:       "3000_network",
+		PathTransformFunc: CASPathTransformFun,
+		Transport:         tr,
 	}
 
-	select {}
+	fs := NewFileServer(fileServerOpts)
+
+	go func() {
+		time.Sleep(3 * time.Second)
+		fs.Stop()
+	}()
+	if err := fs.Start(); err != nil {
+		fmt.Println(err)
+	}
+
+	//select {}
 }

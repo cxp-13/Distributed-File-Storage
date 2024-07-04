@@ -59,6 +59,10 @@ func (t *TCPTransport) ListenAndAccept() error {
 	return nil
 }
 
+func (t *TCPTransport) Close() error {
+	return t.listener.Close()
+}
+
 func (t *TCPTransport) Consume() <-chan RPC {
 	return t.messages
 }

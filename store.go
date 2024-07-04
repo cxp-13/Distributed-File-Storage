@@ -95,6 +95,10 @@ func (s Store) Has(key string) bool {
 	return true
 }
 
+func (s Store) Clear() error {
+	return os.RemoveAll(s.Root)
+}
+
 func (s Store) Delete(key string) error {
 	pathKey := s.PathTransformFunc(key)
 
@@ -105,6 +109,10 @@ func (s Store) Delete(key string) error {
 	firstPathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.FirstPathName())
 
 	return os.RemoveAll(firstPathNameWithRoot)
+}
+
+func (s Store) Write(key string, r io.Reader) error {
+	return s.writeStream(key, r)
 }
 
 func (s Store) Read(key string) ([]byte, error) {
@@ -138,6 +146,7 @@ func (s *Store) writeStream(key string, r io.Reader) error {
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, fullPath)
 
 	f, err := os.Create(fullPathWithRoot)
+	defer f.Close() // Ensure the file is closed after writing
 
 	if err != nil {
 		return err

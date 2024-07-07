@@ -2,19 +2,20 @@ package main
 
 import (
 	"bytes"
+	"distribute-system/server"
 	"fmt"
 	"testing"
 )
 
-func newStore() *Store {
-	opts := StoreOpts{
-		PathTransformFunc: CASPathTransformFun,
+func newStore() *server.Store {
+	opts := server.StoreOpts{
+		PathTransformFunc: server.CASPathTransformFun,
 	}
-	s := NewStore(opts)
+	s := server.NewStore(opts)
 	return s
 }
 
-func teardown(t *testing.T, s *Store) {
+func teardown(t *testing.T, s *server.Store) {
 	if err := s.Clear(); err != nil {
 		t.Error(err)
 	}
@@ -22,7 +23,7 @@ func teardown(t *testing.T, s *Store) {
 
 func TestPathTransformFun(t *testing.T) {
 	key := "mondasdad"
-	pathName := CASPathTransformFun(key)
+	pathName := server.CASPathTransformFun(key)
 	fmt.Println(pathName)
 
 }

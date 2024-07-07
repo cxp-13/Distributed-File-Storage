@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -135,15 +135,18 @@ func (s Store) readStream(key string) (io.ReadCloser, error) {
 }
 
 func (s *Store) writeStream(key string, r io.Reader) error {
+	log.Printf("writing %s", key)
 	pathKey := s.PathTransformFunc(key)
 	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.Pathname)
 
+	log.Println("pathNameWithRoot:", pathNameWithRoot)
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
 		return err
 	}
 
 	fullPath := pathKey.FullPath()
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, fullPath)
+	log.Printf("writing to %s", fullPathWithRoot)
 
 	f, err := os.Create(fullPathWithRoot)
 	defer f.Close() // Ensure the file is closed after writing

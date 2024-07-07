@@ -1,11 +1,21 @@
 package p2p
 
+import (
+	"distribute-system/RPCType"
+	"net"
+)
+
 type Peer interface {
-	Close() error
+	net.Conn
+	Send([]byte) error
+	//RemoteAddr() net.Addr
+	//Close() error
 }
 
 type Transport interface {
-	ListenAndAccept() error
-	Consume() <-chan RPC
+	Dial(string) (net.Conn, error)
+	ListenAndAccept(func(p Peer) error) error
+	Consume() <-chan RPCType.Message
 	Close() error
+	//ListenAddr() string
 }

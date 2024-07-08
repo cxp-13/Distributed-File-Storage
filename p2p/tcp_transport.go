@@ -46,14 +46,14 @@ type TCPTransportOps struct {
 type TCPTransport struct {
 	TCPTransportOps
 	listener net.Listener
-	messages chan RPCType.Message
+	messages chan RPCType.RPC
 	mu       sync.RWMutex
 }
 
 func NewTCPTransport(opts TCPTransportOps) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOps: opts,
-		messages:        make(chan RPCType.Message),
+		messages:        make(chan RPCType.RPC),
 	}
 }
 
@@ -88,7 +88,7 @@ func (t *TCPTransport) Close() error {
 	return t.listener.Close()
 }
 
-func (t *TCPTransport) Consume() <-chan RPCType.Message {
+func (t *TCPTransport) Consume() <-chan RPCType.RPC {
 	return t.messages
 }
 
@@ -135,12 +135,13 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 	}
 
 	for {
-		var msg RPCType.Message
-		if err := t.Decoder.Decode(conn, &msg); err != nil {
+		var rpc RPCType.RPC
+		rpc.From = conn.RemoteAddr().String()
+		if err := t.Decoder.Decode(conn, &rpc); err != nil {
 			log.Printf("Error during decoding: %v\n", err)
 		}
-		log.Printf("%v's peer %v received message: %v\n", t.ListenAddr, conn.RemoteAddr(), string(msg.Payload.Data))
-		t.messages <- msg
+		log.Printf("%v's peer %v received message: %v\n", t.ListenAddr, conn.RemoteAddr())
+		t.messages <- rpc
 	}
 
 }

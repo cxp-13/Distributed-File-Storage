@@ -16,7 +16,7 @@ func makeServer(listenAddr string, nodes ...string) *server.FileServer {
 	tcpOpts := p2p.TCPTransportOps{
 		ListenAddr:    listenAddr,
 		HandshakeFunc: p2p.NOPHandshakeFunc,
-		Decoder:       p2p.GOBDecoder{},
+		Decoder:       p2p.DefaultDecoder{},
 		//OnPeer:        OnPeer,
 	}
 
@@ -58,7 +58,7 @@ func main() {
 	time.Sleep(3 * time.Second)
 	//data := bytes.NewReader([]byte("Hello World"))
 	data := []byte("Hello World")
-	err := s2.StoreData("myprivate", data)
+	err := s2.StoreData("myprivate2", data)
 	if err != nil {
 		panic(err)
 	}

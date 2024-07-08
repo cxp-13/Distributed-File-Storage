@@ -15,7 +15,7 @@ type Peer interface {
 type Transport interface {
 	Dial(string) (net.Conn, error)
 	ListenAndAccept(func(p Peer) error) error
-	Consume() <-chan RPCType.Message
+	Consume() <-chan RPCType.RPC
 	Close() error
 	//ListenAddr() string
 }

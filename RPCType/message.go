@@ -5,12 +5,12 @@ type RPC struct {
 	Payload []byte
 }
 
-type Message struct {
-	From    string
-	Payload DataMessage
-}
+//type Message struct {
+//	From    string
+//	Payload Message
+//}
 
-type DataMessage struct {
+type Message struct {
 	Key  string
 	Data []byte
 }

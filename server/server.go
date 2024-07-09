@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
-	"distribute-system/RPCType"
+	"distribute-system/models"
 	"distribute-system/p2p"
 	"encoding/gob"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -41,7 +43,7 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 	}
 }
 
-func (s *FileServer) broadcast(msg *RPCType.Message) error {
+func (s *FileServer) broadcast(msg *models.Message) error {
 	var buf bytes.Buffer
 	err := gob.NewEncoder(&buf).Encode(msg)
 	if err != nil {
@@ -53,62 +55,54 @@ func (s *FileServer) broadcast(msg *RPCType.Message) error {
 
 	s.peerLock.Lock()
 	defer s.peerLock.Unlock()
-	for addr, peer := range s.peers {
-		log.Printf("%v broadcasting message to: %v", s.ListenAddr, addr)
-		_, err := peer.Write(data)
-		if err != nil {
-			log.Printf("Failed to send message to %v: %v", addr, err)
-		}
-	}
-	log.Printf("broadcast %v's peer count: %v", s.ListenAddr, len(s.peers))
 
+	for addr, peer := range s.peers {
+		if err = peer.Send(data); err != nil {
+			log.Fatalf("%v send message to %v fail: %v", s.ListenAddr, addr, err.Error())
+		}
+		log.Printf("%v send message to %v", s.ListenAddr, addr)
+		//peer.CloseStream()
+	}
 	return nil
 }
 
-//func (s *FileServer) broadcast(msg *RPCType.Message) error {
-//	var peers []io.Writer
-//	for _, peer := range s.peers {
-//		log.Printf("%v broadcasting message to: %v", s.ListenAddr, peer.RemoteAddr().String())
-//		peers = append(peers, peer)
-//	}
-//	log.Printf("broadcast %v's peer count: %v", s.ListenAddr, len(s.peers))
-//
-//	mw := io.MultiWriter(peers...)
-//
-//	return gob.NewEncoder(mw).Encode(msg)
-//}
+func (s *FileServer) StoreData(key string, r io.Reader) error {
+	fileBuf := new(bytes.Buffer)
+	er := io.TeeReader(r, fileBuf)
 
-func (s *FileServer) StoreData(key string, data []byte) error {
-
-	if err := s.store.Write(key, bytes.NewReader(data)); err != nil {
-		return err
-	}
-
-	buf := new(bytes.Buffer)
-	_, err := io.Copy(buf, bytes.NewReader(data))
+	size, err := s.store.Write(key, er)
 	if err != nil {
-		log.Printf("Failed to read data: %v", err)
 		return err
 	}
 
-	msg := RPCType.Message{
-		Key:  key,
-		Data: buf.Bytes(),
+	msg := models.Message{
+		Payload: models.StoreFileMessage{
+			Key:  key,
+			Size: size,
+		},
 	}
-
-	log.Printf("%v broadcasting store key: %v data: %v", s.ListenAddr, msg.Key, string(msg.Data))
 
 	if err = s.broadcast(&msg); err != nil {
 		log.Fatalf("%v broadcast fail %v", s.ListenAddr, err.Error())
 	}
-	//largeData := []byte("this large data")
-	//err = s.broadcast(&RPCType.Message{
-	//	Key:  key,
-	//	Data: largeData,
-	//})
-	//if err != nil {
-	//	log.Fatalf("%v broadcast fail %v", s.ListenAddr, err.Error())
-	//}
+
+	//time.Sleep(3 * time.Second)
+
+	if err = s.sendDataToPeers(fileBuf); err != nil {
+		log.Fatalf("%v send data to peers fail %v", s.ListenAddr, err.Error())
+	}
+
+	return nil
+}
+
+func (s *FileServer) sendDataToPeers(fileBuf *bytes.Buffer) error {
+	var data = fileBuf.Bytes()
+	for addr, peer := range s.peers {
+		if err := peer.Send(data); err != nil {
+			return errors.New(fmt.Sprintf("%v send data to %v fail: %v", s.ListenAddr, addr, err.Error()))
+		}
+		log.Printf("%v send data:%v to %v", s.ListenAddr, string(data), addr)
+	}
 	return nil
 }
 
@@ -135,35 +129,46 @@ func (s *FileServer) loop() {
 		s.Transport.Close()
 	}()
 
-	gob.Register(RPCType.Message{})
-
 	for {
 		select {
 		case rpc := <-s.Transport.Consume():
 			log.Printf("%v receive a rpc from %v", s.ListenAddr, rpc.From)
-			var msg RPCType.Message
+			var msg models.Message
 
 			if err := gob.NewDecoder(bytes.NewReader(rpc.Payload)).Decode(&msg); err != nil {
 				log.Printf("Failed to decode message: %v", err)
 			}
-			log.Printf("%v's server received message: key:%v data:%v \n", s.ListenAddr, msg.Key, string(msg.Data))
-			//if err := s.handleMessage(&m); err != nil {
-			//	log.Printf("Failed to handle message: %v", err)
-			//}
+			if err := s.handleMessage(rpc.From, msg); err != nil {
+				log.Printf("Failed to handle message: %v", err)
+			}
 		case <-s.quitch:
-
 			return
 		}
 
 	}
 }
 
-func (s *FileServer) handleMessage(msg *RPCType.Message) error {
-	//switch v := msg.Payload.(RPCType) {
-	//case *Message:
-	//	log.Printf("Received data message: %v", v)
-	//	//return s.store.Write(v.Key, bytes.NewReader(v.Data))
-	//}
+func (s *FileServer) handleMessage(from string, msg models.Message) error {
+	switch v := msg.Payload.(type) {
+	case models.StoreFileMessage:
+		err := s.handleStoreFileMessage(from, v)
+		return err
+	default:
+		return errors.New("Unknown message type")
+	}
+}
+
+func (s *FileServer) handleStoreFileMessage(from string, msg models.StoreFileMessage) error {
+	peer := s.peers[from]
+	if peer == nil {
+		return errors.New(from + "peer not found")
+	}
+	_, err := s.store.Write(msg.Key, io.LimitReader(peer, msg.Size))
+	if err != nil {
+		return err
+	}
+	log.Printf("%v store file %v success", s.ListenAddr, msg.Key)
+	peer.CloseStream()
 
 	return nil
 }
@@ -189,7 +194,7 @@ func (s *FileServer) bootstrapNetwork() error {
 func (s *FileServer) Start() error {
 	log.Println("Starting server: port:", s.FileServerOpts.ListenAddr)
 
-	if err := s.Transport.ListenAndAccept(s.OnPeer); err != nil {
+	if err := s.Transport.ListenAndAccept(); err != nil {
 		log.Fatalf("failed to listen and accept: %v", err)
 	}
 
@@ -201,4 +206,10 @@ func (s *FileServer) Start() error {
 	}
 	s.loop()
 	return nil
+}
+
+func init() {
+	gob.Register(models.Message{})
+	gob.Register(models.StoreFileMessage{})
+
 }

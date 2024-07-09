@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"distribute-system/p2p"
 	"distribute-system/server"
 	"strings"
@@ -32,7 +33,7 @@ func makeServer(listenAddr string, nodes ...string) *server.FileServer {
 
 	s := server.NewFileServer(fileServerOpts)
 
-	//tr.OnPeer = s.OnPeer
+	tr.OnPeer = s.OnPeer
 
 	return s
 }
@@ -56,9 +57,9 @@ func main() {
 		}
 	}()
 	time.Sleep(3 * time.Second)
-	//data := bytes.NewReader([]byte("Hello World"))
-	data := []byte("Hello World")
-	err := s2.StoreData("myprivate2", data)
+	data := bytes.NewReader([]byte("Hello World"))
+	//data := []byte("Hello World")
+	err := s2.StoreData("myprivate3", data)
 	if err != nil {
 		panic(err)
 	}

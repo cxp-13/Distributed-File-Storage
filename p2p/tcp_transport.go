@@ -1,7 +1,7 @@
 package p2p
 
 import (
-	"distribute-system/RPCType"
+	"distribute-system/models"
 	"log"
 	"net"
 	"sync"
@@ -10,22 +10,28 @@ import (
 type TCPPeer struct {
 	net.Conn
 	outbound bool
+	wg       *sync.WaitGroup
 }
 
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
 		Conn:     conn,
 		outbound: outbound,
+		wg:       &sync.WaitGroup{},
 	}
 }
 
-func (p TCPPeer) Send(b []byte) error {
-	n, err := p.Write(b)
-	if err != nil || n != len(b) {
-
-		log.Fatalf("failed to send message: %v", err)
+func (p *TCPPeer) Send(data []byte) error {
+	_, err := p.Write(data)
+	if err != nil {
+		return err
 	}
 	return nil
+}
+
+func (p *TCPPeer) CloseStream() {
+	log.Printf("Closing stream for peer %s,  -1", p.LocalAddr().String())
+	p.wg.Done()
 }
 
 //func (p TCPPeer) RemoteAddr() net.Addr {
@@ -40,20 +46,20 @@ type TCPTransportOps struct {
 	ListenAddr    string
 	HandshakeFunc HandshakeFunc
 	Decoder       Decoder
-	//OnPeer        func(Peer) error
+	OnPeer        func(Peer) error
 }
 
 type TCPTransport struct {
 	TCPTransportOps
 	listener net.Listener
-	messages chan RPCType.RPC
+	rpcs     chan models.RPC
 	mu       sync.RWMutex
 }
 
 func NewTCPTransport(opts TCPTransportOps) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOps: opts,
-		messages:        make(chan RPCType.RPC),
+		rpcs:            make(chan models.RPC),
 	}
 }
 
@@ -66,11 +72,11 @@ func (t *TCPTransport) Dial(addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	go t.handleConn(conn)
+	go t.handleConn(conn, true)
 	return conn, nil
 }
 
-func (t *TCPTransport) ListenAndAccept(f func(p Peer) error) error {
+func (t *TCPTransport) ListenAndAccept() error {
 
 	var err error
 
@@ -79,7 +85,7 @@ func (t *TCPTransport) ListenAndAccept(f func(p Peer) error) error {
 		return err
 	}
 
-	go t.acceptLoop(f)
+	go t.acceptLoop()
 
 	return nil
 }
@@ -88,60 +94,56 @@ func (t *TCPTransport) Close() error {
 	return t.listener.Close()
 }
 
-func (t *TCPTransport) Consume() <-chan RPCType.RPC {
-	return t.messages
+func (t *TCPTransport) Consume() <-chan models.RPC {
+	return t.rpcs
 }
 
-func (t *TCPTransport) acceptLoop(f func(p Peer) error) {
+func (t *TCPTransport) acceptLoop() {
 	for {
 		conn, err := t.listener.Accept()
 		if err != nil {
 			log.Printf("Error accepting connection: %v\n", err)
 		}
 		log.Printf("%v accepted connection from %v\n", t.ListenAddr, conn.RemoteAddr())
-		err = f(NewTCPPeer(conn, false))
-		if err != nil {
-			log.Printf("Error during OnPeer: %v\n", err)
-		}
-		go t.handleConn(conn)
+		go t.handleConn(conn, false)
 	}
 }
 
-type Temp struct {
-}
-
-func (t *TCPTransport) handleConn(conn net.Conn) {
-
+func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 	var err error
+	peer := NewTCPPeer(conn, outbound)
 
 	defer func() {
 		log.Printf("Closing connection from %v\n", conn.RemoteAddr())
 		conn.Close()
 	}()
 
-	//tcpPeer := NewTCPPeer(conn, outbound)
-
-	//if t.OnPeer != nil {
-	//	if err = t.OnPeer(tcpPeer); err != nil {
-	//		log.Printf("Error during OnPeer: %v\n", err)
-	//		return
-	//	}
-	//}
-
 	if err = t.HandshakeFunc(conn); err != nil {
-		log.Printf("Error during handshake: %v\n", err)
-		conn.Close()
-		return
+		log.Fatalf("Error during handshake: %v\n", err)
+	}
+
+	if t.OnPeer != nil {
+		if err = t.OnPeer(peer); err != nil {
+			return
+		}
 	}
 
 	for {
-		var rpc RPCType.RPC
+		var rpc models.RPC
 		rpc.From = conn.RemoteAddr().String()
 		if err := t.Decoder.Decode(conn, &rpc); err != nil {
 			log.Printf("Error during decoding: %v\n", err)
 		}
-		log.Printf("%v's peer %v received message: %v\n", t.ListenAddr, conn.RemoteAddr())
-		t.messages <- rpc
+		peer.wg.Add(1)
+		log.Printf("%v wg +1", conn.LocalAddr().String())
+		log.Printf("%v received peer %v", t.ListenAddr, conn.LocalAddr().String())
+
+		t.rpcs <- rpc
+		peer.wg.Wait()
+
 	}
 
+}
+
+func init() {
 }

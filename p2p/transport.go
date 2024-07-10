@@ -8,6 +8,7 @@ import (
 type Peer interface {
 	net.Conn
 	Send([]byte) error
+	FetchData() ([]byte, error)
 	//RemoteAddr() net.Addr
 	CloseStream()
 }
@@ -17,5 +18,6 @@ type Transport interface {
 	ListenAndAccept() error
 	Consume() <-chan models.RPC
 	Close() error
+	Addr() string
 	//ListenAddr() string
 }

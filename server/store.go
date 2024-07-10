@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -115,16 +114,17 @@ func (s Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
 
-func (s Store) Read(key string) ([]byte, error) {
-	stream, err := s.readStream(key)
-	if err != nil {
-		return nil, err
-	}
-
-	defer stream.Close()
-	b := new(bytes.Buffer)
-	b.ReadFrom(stream)
-	return b.Bytes(), nil
+func (s Store) Read(key string) (io.Reader, error) {
+	//stream, err := s.readStream(key)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//defer stream.Close()
+	//b := new(bytes.Buffer)
+	//b.ReadFrom(stream)
+	//return b.Bytes(), nil
+	return s.readStream(key)
 }
 
 func (s Store) readStream(key string) (io.ReadCloser, error) {

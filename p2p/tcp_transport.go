@@ -9,14 +9,14 @@ import (
 
 type TCPPeer struct {
 	net.Conn
-	outbound bool
+	Outbound bool
 	wg       *sync.WaitGroup
 }
 
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
 		Conn:     conn,
-		outbound: outbound,
+		Outbound: outbound,
 		wg:       &sync.WaitGroup{},
 	}
 }
@@ -29,8 +29,17 @@ func (p *TCPPeer) Send(data []byte) error {
 	return nil
 }
 
+func (p *TCPPeer) FetchData() ([]byte, error) {
+	buffer := make([]byte, 1024)
+	n, err := p.Read(buffer)
+	if err != nil {
+		log.Printf("Error reading data from peer %s, %v", p.LocalAddr().String(), err)
+		return nil, err
+	}
+	return buffer[:n], nil
+}
+
 func (p *TCPPeer) CloseStream() {
-	log.Printf("Closing stream for peer %s,  -1", p.LocalAddr().String())
 	p.wg.Done()
 }
 
@@ -46,7 +55,7 @@ type TCPTransportOps struct {
 	ListenAddr    string
 	HandshakeFunc HandshakeFunc
 	Decoder       Decoder
-	OnPeer        func(Peer) error
+	OnPeer        func(TCPPeer) error
 }
 
 type TCPTransport struct {
@@ -63,9 +72,9 @@ func NewTCPTransport(opts TCPTransportOps) *TCPTransport {
 	}
 }
 
-//func (t *TCPTransport) ListenAddr() string {
-//	return t.ListenAddr
-//}
+func (t *TCPTransport) Addr() string {
+	return t.ListenAddr
+}
 
 func (t *TCPTransport) Dial(addr string) (net.Conn, error) {
 	conn, err := net.Dial("tcp", addr)
@@ -123,7 +132,7 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 	}
 
 	if t.OnPeer != nil {
-		if err = t.OnPeer(peer); err != nil {
+		if err = t.OnPeer(*peer); err != nil {
 			return
 		}
 	}
@@ -132,18 +141,21 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 		var rpc models.RPC
 		rpc.From = conn.RemoteAddr().String()
 		if err := t.Decoder.Decode(conn, &rpc); err != nil {
-			log.Printf("Error during decoding: %v\n", err)
+			log.Printf("decode error: %v", err)
+			continue
 		}
-		peer.wg.Add(1)
-		log.Printf("%v wg +1", conn.LocalAddr().String())
-		log.Printf("%v received peer %v", t.ListenAddr, conn.LocalAddr().String())
+		log.Printf("transport:%v | handleConn local: %v, remote: %v", t.ListenAddr, conn.LocalAddr().String(), conn.RemoteAddr().String())
 
+		if rpc.Stream {
+			log.Printf("transport:%v | %v receive stream signal, stop listen !!!.  waitGroup +1", t.ListenAddr, conn.LocalAddr().String())
+			peer.wg.Add(1)
+			peer.wg.Wait()
+			continue
+		}
 		t.rpcs <- rpc
-		peer.wg.Wait()
-
 	}
-
 }
 
 func init() {
+
 }

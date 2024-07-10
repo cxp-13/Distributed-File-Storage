@@ -4,14 +4,10 @@ import (
 	"bytes"
 	"distribute-system/p2p"
 	"distribute-system/server"
+	"fmt"
 	"strings"
 	"time"
 )
-
-//func OnPeer(peer p2p.Peer) error {
-//	fmt.Printf("New peer connected \n")
-//	return nil
-//}
 
 func makeServer(listenAddr string, nodes ...string) *server.FileServer {
 	tcpOpts := p2p.TCPTransportOps{
@@ -56,14 +52,24 @@ func main() {
 			panic(err2)
 		}
 	}()
-	time.Sleep(3 * time.Second)
-	data := bytes.NewReader([]byte("Hello World"))
-	//data := []byte("Hello World")
-	err := s2.StoreData("myprivate3", data)
-	if err != nil {
-		panic(err)
+	time.Sleep(500 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		data := bytes.NewReader([]byte("H"))
+		err := s2.StoreData(fmt.Sprint("myprivate_", i), data)
+		if err != nil {
+			panic(err)
+		}
 	}
 
+	//r, err := s2.Get("myprivate3")
+	//if err != nil {
+	//	panic(err)
+	//}
+	//b, err := ioutil.ReadAll(r)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//log.Printf("Got data: %s", string(b))
 	select {}
 
 }

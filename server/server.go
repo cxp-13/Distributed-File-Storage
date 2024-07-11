@@ -2,8 +2,10 @@ package server
 
 import (
 	"bytes"
+	"distribute-system/crypto"
 	"distribute-system/models"
 	"distribute-system/p2p"
+	"encoding/binary"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 )
 
 type FileServerOpts struct {
+	EncKey            []byte
 	ListenAddr        string
 	StorageRoot       string
 	PathTransformFunc PathTransformFunc
@@ -23,7 +26,7 @@ type FileServerOpts struct {
 
 type FileServer struct {
 	FileServerOpts
-	store  *Store
+	Store  *Store
 	quitch chan struct{}
 
 	peerLock sync.Mutex
@@ -38,13 +41,13 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 
 	return &FileServer{
 		FileServerOpts: opts,
-		store:          NewStore(storeOpts),
+		Store:          NewStore(storeOpts),
 		quitch:         make(chan struct{}),
 		peers:          make(map[string]p2p.TCPPeer),
 	}
 }
 
-func (s *FileServer) broadcast(msg *models.Message, msgType byte) error {
+func (s *FileServer) broadcast(msg *models.Message) error {
 	var buf bytes.Buffer
 	err := gob.NewEncoder(&buf).Encode(msg)
 	if err != nil {
@@ -59,23 +62,19 @@ func (s *FileServer) broadcast(msg *models.Message, msgType byte) error {
 
 	for addr, peer := range s.peers {
 		if peer.Outbound {
-			err := peer.Send([]byte{msgType})
-			if err != nil {
-				return err
-			}
+			peer.Send([]byte{models.IncomingMessage})
 			if err = peer.Send(data); err != nil {
 				log.Fatalf("%v send message to %v fail: %v", s.ListenAddr, addr, err.Error())
 			}
 			log.Printf("%v send message to %v", s.ListenAddr, addr)
-			//peer.CloseStream()
 		}
 	}
 	return nil
 }
 
 func (s *FileServer) Get(key string) (io.Reader, error) {
-	if s.store.Has(key) {
-		return s.store.Read(key)
+	if s.Store.Has(key) {
+		return s.Store.Read(key)
 	}
 
 	log.Printf("%v has no key %v, fetch from network", s.ListenAddr, key)
@@ -86,39 +85,41 @@ func (s *FileServer) Get(key string) (io.Reader, error) {
 		},
 	}
 
-	if err := s.broadcast(&msg, models.IncomingMessage); err != nil {
+	if err := s.broadcast(&msg); err != nil {
 		log.Fatalf("%v broadcast get msg fail %v", s.ListenAddr, err.Error())
 		return nil, err
 	}
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 1)
 
 	//var multiReader io.Reader
 	for addr, peer := range s.peers {
 		if peer.Outbound {
-			data, err := peer.FetchData()
-			if err != nil {
-				return nil, errors.New(fmt.Sprintf("%v fetch data from %v fail: %v", s.ListenAddr, addr, err.Error()))
-			}
-			if len(data) == 0 {
-				log.Printf("%v fetch data from %v fail: data is empty", s.ListenAddr, addr)
+			var fileSize int64
+			if err := binary.Read(peer, binary.LittleEndian, &fileSize); err != nil {
+				log.Printf("%v read file size from %v fail: %v", s.ListenAddr, addr, err.Error())
 				continue
 			}
-			reader := bytes.NewReader(data)
-			//multiReader = io.MultiReader(multiReader, reader)
-			time.Sleep(time.Second * 4)
+			//fileReader, err := peer.ReadStream()
+			//if err != nil {
+			//	return nil, errors.New(fmt.Sprintf("%v fetch data from %v fail: %v", s.ListenAddr, addr, err.Error()))
+			//}
+			_, err := s.Store.WriteDecrypt(s.EncKey, key, io.LimitReader(peer, fileSize))
+			//_, err = s.Store.Write(key, fileReader)
+			if err != nil {
+				return nil, errors.New(fmt.Sprintf("%v Store data from %v fail: %v", s.ListenAddr, addr, err.Error()))
+			}
 			log.Printf("server: %v|closing %v stream,  -1", s.ListenAddr, addr)
 			peer.CloseStream()
-			return reader, nil
 		}
 	}
-	return nil, nil
+	return s.Store.Read(key)
 }
 
 func (s *FileServer) StoreData(key string, r io.Reader) error {
 	fileBuf := new(bytes.Buffer)
 	er := io.TeeReader(r, fileBuf)
 
-	size, err := s.store.Write(key, er)
+	size, err := s.Store.Write(key, er)
 	if err != nil {
 		return err
 	}
@@ -126,12 +127,12 @@ func (s *FileServer) StoreData(key string, r io.Reader) error {
 	msg := models.Message{
 		Payload: models.StoreFileMessage{
 			Key:  key,
-			Size: size,
+			Size: size + 16,
 		},
 	}
 
-	if err = s.broadcast(&msg, models.IncomingMessage); err != nil {
-		log.Fatalf("%v broadcast store file fail %v", s.ListenAddr, err.Error())
+	if err = s.broadcast(&msg); err != nil {
+		log.Fatalf("%v broadcast Store file fail %v", s.ListenAddr, err.Error())
 	}
 
 	time.Sleep(time.Millisecond * 500)
@@ -149,7 +150,7 @@ func (s *FileServer) sendDataToPeers(fileBuf *bytes.Buffer) error {
 		if err := peer.Send([]byte{models.IncomingStream}); err != nil {
 			return errors.New(fmt.Sprintf("%v send IncomingStream to %v fail: %v", s.ListenAddr, addr, err.Error()))
 		}
-		if err := peer.Send(data); err != nil {
+		if _, err := crypto.CopyEncrypt(s.EncKey, fileBuf, peer); err != nil {
 			return errors.New(fmt.Sprintf("%v send data to %v fail: %v", s.ListenAddr, addr, err.Error()))
 		}
 		log.Printf("%v send data:%v to %v", s.ListenAddr, string(data), addr)
@@ -203,7 +204,7 @@ func (s *FileServer) loop() {
 func (s *FileServer) handleMessage(from string, msg models.Message) error {
 	switch v := msg.Payload.(type) {
 	case models.StoreFileMessage:
-		log.Printf("%v receive a store file message from %v", s.ListenAddr, from)
+		log.Printf("%v receive a Store file message from %v", s.ListenAddr, from)
 		err := s.handleStoreFileMessage(from, v)
 		return err
 
@@ -218,21 +219,25 @@ func (s *FileServer) handleMessage(from string, msg models.Message) error {
 }
 
 func (s *FileServer) handleGetFileMessage(from string, msg models.GetFileMessage) error {
-	peer := s.peers[from]
-	//if peer == nil {
-	//	return errors.New(from + "peer not found")
-	//}
-	if !s.store.Has(msg.Key) {
+	peer, has := s.peers[from]
+	if !has {
+		return errors.New(from + "peer not found")
+	}
+	if !s.Store.Has(msg.Key) {
 		return errors.New(peer.LocalAddr().String() + "has no key " + msg.Key)
 	}
-	reader, err := s.store.Read(msg.Key)
+	file, err := s.Store.Read(msg.Key)
 	if err != nil {
 		return err
 	}
 	if err = peer.Send([]byte{models.IncomingStream}); err != nil {
 		return err
 	}
-	_, err = io.Copy(peer, reader)
+	stat, _ := file.Stat()
+	if err := binary.Write(peer, binary.LittleEndian, stat.Size()); err != nil {
+		return err
+	}
+	_, err = io.Copy(peer, file)
 	if err != nil {
 		return err
 	}
@@ -244,11 +249,11 @@ func (s *FileServer) handleStoreFileMessage(from string, msg models.StoreFileMes
 	//if peer == nil {
 	//	return errors.New(from + "peer not found")
 	//}
-	_, err := s.store.Write(msg.Key, io.LimitReader(peer, msg.Size))
+	_, err := s.Store.Write(msg.Key, io.LimitReader(peer, msg.Size))
 	if err != nil {
 		return err
 	}
-	log.Printf("%v server | %v store file %v success, close stream, waitGroup -1", s.ListenAddr, peer.LocalAddr().String(), msg.Key)
+	log.Printf("%v server | %v Store file %v success, close stream, waitGroup -1", s.ListenAddr, peer.LocalAddr().String(), msg.Key)
 	peer.CloseStream()
 	return nil
 }

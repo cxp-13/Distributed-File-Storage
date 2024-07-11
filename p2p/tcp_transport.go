@@ -4,73 +4,7 @@ import (
 	"distribute-system/models"
 	"log"
 	"net"
-	"sync"
 )
-
-type TCPPeer struct {
-	net.Conn
-	Outbound bool
-	wg       *sync.WaitGroup
-}
-
-func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
-	return &TCPPeer{
-		Conn:     conn,
-		Outbound: outbound,
-		wg:       &sync.WaitGroup{},
-	}
-}
-
-func (p *TCPPeer) Send(data []byte) error {
-	_, err := p.Write(data)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *TCPPeer) FetchData() ([]byte, error) {
-	buffer := make([]byte, 1024)
-	n, err := p.Read(buffer)
-	if err != nil {
-		log.Printf("Error reading data from peer %s, %v", p.LocalAddr().String(), err)
-		return nil, err
-	}
-	return buffer[:n], nil
-}
-
-func (p *TCPPeer) CloseStream() {
-	p.wg.Done()
-}
-
-//func (p TCPPeer) RemoteAddr() net.Addr {
-//	return p.conn.RemoteAddr()
-//}
-//
-//func (p TCPPeer) Close() error {
-//	return p.conn.Close()
-//}
-
-type TCPTransportOps struct {
-	ListenAddr    string
-	HandshakeFunc HandshakeFunc
-	Decoder       Decoder
-	OnPeer        func(TCPPeer) error
-}
-
-type TCPTransport struct {
-	TCPTransportOps
-	listener net.Listener
-	rpcs     chan models.RPC
-	mu       sync.RWMutex
-}
-
-func NewTCPTransport(opts TCPTransportOps) *TCPTransport {
-	return &TCPTransport{
-		TCPTransportOps: opts,
-		rpcs:            make(chan models.RPC),
-	}
-}
 
 func (t *TCPTransport) Addr() string {
 	return t.ListenAddr

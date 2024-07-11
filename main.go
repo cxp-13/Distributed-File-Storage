@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"distribute-system/crypto"
 	"distribute-system/p2p"
 	"distribute-system/server"
-	"fmt"
+	"io/ioutil"
+	"log"
 	"strings"
 	"time"
 )
@@ -20,6 +22,7 @@ func makeServer(listenAddr string, nodes ...string) *server.FileServer {
 	tr := p2p.NewTCPTransport(tcpOpts)
 
 	fileServerOpts := server.FileServerOpts{
+		EncKey:            crypto.NewEncryptionKey(),
 		ListenAddr:        listenAddr,
 		StorageRoot:       "store_" + strings.TrimPrefix(listenAddr, ":"),
 		PathTransformFunc: server.CASPathTransformFun,
@@ -53,23 +56,28 @@ func main() {
 		}
 	}()
 	time.Sleep(500 * time.Millisecond)
-	for i := 0; i < 3; i++ {
-		data := bytes.NewReader([]byte("H"))
-		err := s2.StoreData(fmt.Sprint("myprivate_", i), data)
-		if err != nil {
-			panic(err)
-		}
+
+	key := "coolPicure"
+
+	data := bytes.NewReader([]byte("Hello world"))
+
+	if err := s2.StoreData(key, data); err != nil {
+		panic(err)
 	}
 
-	//r, err := s2.Get("myprivate3")
-	//if err != nil {
-	//	panic(err)
-	//}
-	//b, err := ioutil.ReadAll(r)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//log.Printf("Got data: %s", string(b))
+	if err := s2.Store.Delete(key); err != nil {
+		panic(err)
+	}
+
+	r, err := s2.Get(key)
+	if err != nil {
+		panic(err)
+	}
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Got data: %s", string(b))
 	select {}
 
 }

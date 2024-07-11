@@ -5,14 +5,6 @@ import (
 	"net"
 )
 
-type Peer interface {
-	net.Conn
-	Send([]byte) error
-	FetchData() ([]byte, error)
-	//RemoteAddr() net.Addr
-	CloseStream()
-}
-
 type Transport interface {
 	Dial(string) (net.Conn, error)
 	ListenAndAccept() error

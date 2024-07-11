@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/sha1"
+	"distribute-system/crypto"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 	"strings"
 )
 
-var defaultRootName = "tmp/store"
+var defaultRootName = "tmp/Store"
 
 func CASPathTransformFun(key string) PathKey {
 	hash := sha1.Sum([]byte(key))
@@ -82,7 +83,7 @@ func NewStore(opts StoreOpts) *Store {
 	}
 }
 
-func (s Store) Has(key string) bool {
+func (s *Store) Has(key string) bool {
 	pathKey := s.PathTransformFunc(key)
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.FullPath())
 	_, err := os.Stat(fullPathWithRoot)
@@ -94,11 +95,11 @@ func (s Store) Has(key string) bool {
 	return true
 }
 
-func (s Store) Clear() error {
+func (s *Store) Clear() error {
 	return os.RemoveAll(s.Root)
 }
 
-func (s Store) Delete(key string) error {
+func (s *Store) Delete(key string) error {
 	pathKey := s.PathTransformFunc(key)
 
 	defer func() {
@@ -110,58 +111,48 @@ func (s Store) Delete(key string) error {
 	return os.RemoveAll(firstPathNameWithRoot)
 }
 
-func (s Store) Write(key string, r io.Reader) (int64, error) {
+func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
 
-func (s Store) Read(key string) (io.Reader, error) {
-	//stream, err := s.readStream(key)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//defer stream.Close()
-	//b := new(bytes.Buffer)
-	//b.ReadFrom(stream)
-	//return b.Bytes(), nil
-	return s.readStream(key)
-}
-
-func (s Store) readStream(key string) (io.ReadCloser, error) {
-	pathKey := s.PathTransformFunc(key)
-	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.FullPath())
-	return os.Open(fullPathWithRoot)
-
-}
-
 func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
-	log.Printf("writing %s", key)
+	f, err := s.openFileForWriting(key)
+	if err != nil {
+		return 0, err
+	}
+	return io.Copy(f, r)
+}
+
+func (s *Store) WriteDecrypt(encKey []byte, key string, r io.Reader) (int64, error) {
+	f, err := s.openFileForWriting(key)
+	if err != nil {
+		return 0, err
+	}
+	n, err := crypto.CopyDecrypt(encKey, r, f)
+	return int64(n), err
+}
+
+func (s *Store) openFileForWriting(key string) (*os.File, error) {
 	pathKey := s.PathTransformFunc(key)
 	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.Pathname)
 
-	log.Println("pathNameWithRoot:", pathNameWithRoot)
+	log.Printf("key:%v pathNameWithRoot:%v", key, pathNameWithRoot)
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	fullPath := pathKey.FullPath()
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, fullPath)
-	log.Printf("writing to %s", fullPathWithRoot)
 
-	f, err := os.Create(fullPathWithRoot)
-	defer f.Close()
+	return os.Create(fullPathWithRoot)
+}
 
-	if err != nil {
-		return 0, err
-	}
-	n, err := io.Copy(f, r)
+func (s *Store) Read(key string) (*os.File, error) {
+	return s.readStream(key)
+}
 
-	if err != nil {
-		return 0, err
-	}
-
-	log.Printf("written %d bytes to %s", n, pathKey.Filename)
-
-	return n, err
-
+func (s *Store) readStream(key string) (*os.File, error) {
+	pathKey := s.PathTransformFunc(key)
+	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.FullPath())
+	return os.Open(fullPathWithRoot)
 }

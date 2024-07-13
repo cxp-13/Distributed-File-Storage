@@ -5,7 +5,6 @@ import (
 	"distribute-system/crypto"
 	"distribute-system/p2p"
 	"distribute-system/server"
-	"io/ioutil"
 	"log"
 	"strings"
 	"time"
@@ -40,44 +39,55 @@ func makeServer(listenAddr string, nodes ...string) *server.FileServer {
 func main() {
 
 	s1 := makeServer(":3000")
-	s2 := makeServer(":4000", ":3000")
+	s2 := makeServer(":4000")
+	s3 := makeServer(":5000", ":3000", ":4000")
 
 	go func() {
 		err := s1.Start()
 		if err != nil {
+			log.Printf("Error starting server 1: %v", err)
 			panic(err)
 		}
 	}()
-
+	time.Sleep(1 * time.Second)
 	go func() {
-		err2 := s2.Start()
-		if err2 != nil {
-			panic(err2)
+		err := s2.Start()
+		if err != nil {
+			log.Printf("Error starting server 2: %v", err)
+			panic(err)
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
+	go func() {
+		err := s3.Start()
+		if err != nil {
+			log.Printf("Error starting server 3: %v", err)
+			panic(err)
+		}
+	}()
+	time.Sleep(3 * time.Second)
 
 	key := "coolPicure"
 
 	data := bytes.NewReader([]byte("Hello world"))
 
-	if err := s2.StoreData(key, data); err != nil {
+	if err := s3.StoreData(key, data); err != nil {
 		panic(err)
 	}
 
-	if err := s2.Store.Delete(key); err != nil {
-		panic(err)
-	}
-
-	r, err := s2.Get(key)
-	if err != nil {
-		panic(err)
-	}
-	b, err := ioutil.ReadAll(r)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Got data: %s", string(b))
+	//if err := s2.Store.Delete(key); err != nil {
+	//	panic(err)
+	//}
+	//
+	//r, err := s2.Get(key)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//b, err := ioutil.ReadAll(r)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//log.Printf("Got data: %s", string(b))
 	select {}
 
 }
